@@ -46,21 +46,21 @@ function WriteFailure()
 
 
 # Variables ---------------------------------------------------------------------------------------->
-$PathToApp = "C:\Users\kadodds\Source\Repos\install-certificate-app"
+$PathToApp = "C:\Users\kadodds\Source\Repos\CertificateDistributionTracking\install-certificate-app"
 $PathToCsproj = ".\install-certificate-app.csproj"
 $PathToPublishedApps = ".\bin\Release\netcoreapp2.0"
 $PathToZipArchives = ".\bin\Release\netcoreapp2.0\zip-archive"
-$PathToWebAppZipArchive = "C:\Users\kadodds\Source\Repos\CertificateDistribution\CertificateDistribution\Distribution_Apps"
-$AdminZipArchive = "Admin_Cert"
-$ReadOnlyZipArchive = "ReadOnly_Cert"
-$PathToWebApp = "C:\Users\kadodds\Source\Repos\CertificateDistribution"
+$PathToWebAppZipArchive = "\CertificateDistribution\Distribution_Apps"
+
+$PathToWebApp = "C:\Users\kadodds\Source\Repos\CertificateDistributionTracking\CertificateDistribution"
 $deploymentBranch = "master"
+
+$certTypes = @("admin", "readonly")
 
 # Get the Runtime Identifiers from csproj file ----------------------------------------------------->
 WriteTitle("FINDING APP");
 cd $PathToApp
 WriteSuccess
-
 
 # Get the Runtime Identifiers from csproj file ----------------------------------------------------->
 WriteTitle("GETTING RUNTIME IDENTIFIERS")
@@ -69,6 +69,39 @@ $proj = [xml] (Get-Content -Path $PathToCsproj)
 $identifiersString = [string] ($proj.Project.PropertyGroup.RuntimeIdentifiers)
 $identifiersString = $identifiersString.Trim()
 $identifiersArray = $identifiersString -split ";"
+WriteSuccess
+
+
+foreach($type in $certTypes)
+{
+
+# Set Cert type from App Settings file ------------------------------------------------------------->
+WriteTitle("SETTING CERTIFICATION TYPE TO $type")
+WriteText("Writing to appsettings.json")
+$jsonObj = Get-Content -Path .\appsettings.json | ConvertFrom-Json 
+$jsonObj.certificate_info.cert_prefix = $type
+$jsonString = $jsonObj | ConvertTo-Json | Out-File -FilePath .\appsettings.json
+WriteSuccess
+
+
+# Adjust certificate file based on certificate type
+WriteTitle("SETTING 'CopyToOutputDirectory' FOR $type CERTIFICATE")
+$proj = [xml] (Get-Content -Path $PathToCsproj)
+$itmGroup = $proj.Project.ItemGroup.None
+foreach($itm in $itmGroup)
+{
+    if ($itm.Include -ne "${type}_certificate.cer" -and $itm.Include -ne "appsettings.json")
+    {
+        WriteText("Setting 'CopyToOutputDirectory' to Never for $itm.Include")
+        $itm.CopyToOutputDirectory = "Never"
+    } else 
+    {
+        WriteText("Setting 'CopyToOutputDirectory' to Always for $itm.Include")
+        $itm.CopyToOutputDirectory = "Always"
+    }
+}
+
+$proj.Save("$PathToApp\$PathToCsproj")
 WriteSuccess
 
 
@@ -83,7 +116,6 @@ WriteTitle("BUILDING PROJECT")
 dotnet build
 WriteSuccess
 
- 
 # Publish according to runtime --------------------------------------------------------------------->
 WriteTitle("PUBLISHING TO RUNTIMES")
 foreach ($runtime in $identifiersArray) 
@@ -95,6 +127,7 @@ foreach ($runtime in $identifiersArray)
 }
 WriteSuccess
 
+
 # Compress published apps to distributable zip archives ------------------------------------------->
 WriteTitle("COMPRESSING DISTRIBUTABLE APPS")
 foreach ($runtime in $identifiersArray) 
@@ -102,18 +135,21 @@ foreach ($runtime in $identifiersArray)
     Write-Host
     Write-Host
     WriteText("Compressing $runtime app")
-    Compress-Archive -Path $PathToPublishedApps\$runtime -DestinationPath $PathToZipArchives\cert-install-$runtime.zip -Force
+    Compress-Archive -Path $PathToPublishedApps\$runtime -DestinationPath $PathToZipArchives\$type\cert-install-$runtime.zip -Force
 }
 WriteSuccess
 
+
 # Copy Zip Archives to Cert Distribution Web App -------------------------------------------------->
 WriteTitle("TRANSFERING ZIP ARCHIVES TO WEB APP")
-foreach ($zip in (Get-ChildItem $PathToZipArchives)) 
+foreach ($zip in (Get-ChildItem $PathToZipArchives\$type)) 
 {
     WriteText("Sending '$zip' to Web App")
-    Copy-Item -Path $PathToZipArchives\$zip -Destination $PathToWebAppZipArchive\$AdminZipArchive\
+    Copy-Item -Path $PathToZipArchives\$type\$zip -Destination $PathToWebApp\$PathToWebAppZipArchive\$type\
 }
 WriteSuccess
+
+} # end foreach
 
 
 # Change to Web App Directory --------------------------------------------------------------------->
